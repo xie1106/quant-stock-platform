@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的量化选股平台</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- 顶部导航 -->
+    <header class="header">
+        <div class="container">
+            <div class="logo">
+                <span class="logo-icon">📈</span>
+                <h1>我的量化选股平台</h1>
+            </div>
+            <nav class="nav">
+                <button class="nav-btn active" data-tab="screen">
+                    <span class="nav-icon">🔍</span>
+                    <span>智能选股</span>
+                </button>
+                <button class="nav-btn" data-tab="backtest">
+                    <span class="nav-icon">📊</span>
+                    <span>策略回测</span>
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="main">
+        <div class="container">
+            <!-- 选股页面 -->
+            <section id="screen-tab" class="tab-content active">
+                <div class="page-header">
+                    <div>
+                        <h2>智能选股</h2>
+                        <p class="subtitle">基于杨永兴尾盘战法，一键筛选优质标的</p>
+                    </div>
+                    <button id="start-screen-btn" class="btn btn-primary btn-lg">
+                        <span class="btn-icon">🚀</span>
+                        开始选股
+                    </button>
+                </div>
+
+                <!-- 策略说明卡片 -->
+                <div class="strategy-card">
+                    <div class="strategy-header">
+                        <h3>杨永兴尾盘战法</h3>
+                        <span class="strategy-badge">经典策略</span>
+                    </div>
+                    <p class="strategy-desc">
+                        尾盘买入法，通过筛选当日涨幅3%-5%、近30日有涨停、市值小于200亿、
+                        量比大于1、换手率5%-10%、14:30后创新高且回踩不破的标的，博取次日冲高收益。
+                    </p>
+                    <div class="conditions-grid" id="conditions-grid">
+                        <!-- 动态生成条件 -->
+                    </div>
+                </div>
+
+                <!-- 选股进度 -->
+                <div id="screen-progress" class="progress-card" style="display: none;">
+                    <div class="progress-header">
+                        <h3>选股进行中</h3>
+                        <span id="progress-status" class="status-badge status-running">运行中</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+                    </div>
+                    <p id="progress-message" class="progress-message">正在初始化...</p>
+                </div>
+
+                <!-- 选股结果 -->
+                <div id="screen-result" class="result-card" style="display: none;">
+                    <div class="result-header">
+                        <h3>选股结果</h3>
+                        <span id="result-count" class="result-count">共找到 0 只股票</span>
+                    </div>
+                    <div class="table-container">
+                        <table class="stock-table">
+                            <thead>
+                                <tr>
+                                    <th>代码</th>
+                                    <th>名称</th>
+                                    <th>现价</th>
+                                    <th>涨跌幅</th>
+                                    <th>换手率</th>
+                                    <th>量比</th>
+                                    <th>总市值(亿)</th>
+                                    <th>30日涨停</th>
+                                    <th>匹配度</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="stock-table-body">
+                                <!-- 动态生成 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 回测页面 -->
+            <section id="backtest-tab" class="tab-content">
+                <div class="page-header">
+                    <div>
+                        <h2>策略回测</h2>
+                        <p class="subtitle">历史数据回测，验证策略有效性</p>
+                    </div>
+                </div>
+
+                <div class="backtest-layout">
+                    <!-- 回测参数 -->
+                    <div class="backtest-form-card">
+                        <h3 class="card-title">回测参数</h3>
+                        <form id="backtest-form">
+                            <div class="form-group">
+                                <label for="bt-code">股票代码</label>
+                                <input type="text" id="bt-code" placeholder="如：600519" value="600519">
+                            </div>
+                            <div class="form-group">
+                                <label for="bt-strategy">策略选择</label>
+                                <select id="bt-strategy">
+                                    <option value="yang_yongxing">杨永兴尾盘战法</option>
+                                </select>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="bt-capital">初始本金(元)</label>
+                                    <input type="number" id="bt-capital" value="100000" min="1000">
+                                </div>
+                                <div class="form-group">
+                                    <label for="bt-commission">手续费率(%)</label>
+                                    <input type="number" id="bt-commission" value="0.1" step="0.01" min="0">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="bt-start">开始日期</label>
+                                    <input type="date" id="bt-start">
+                                </div>
+                                <div class="form-group">
+                                    <label for="bt-end">结束日期</label>
+                                    <input type="date" id="bt-end">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-block">
+                                <span class="btn-icon">📊</span>
+                                开始回测
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- 回测结果 -->
+                    <div class="backtest-result-card">
+                        <h3 class="card-title">回测结果</h3>
+                        <div id="backtest-placeholder" class="placeholder">
+                            <div class="placeholder-icon">📈</div>
+                            <p>填写参数后点击"开始回测"查看结果</p>
+                        </div>
+                        <div id="backtest-result" style="display: none;">
+                            <!-- 绩效指标 -->
+                            <div class="metrics-grid">
+                                <div class="metric-card metric-primary">
+                                    <div class="metric-label">总收益率</div>
+                                    <div class="metric-value" id="metric-total-return">--</div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">年化收益率</div>
+                                    <div class="metric-value" id="metric-annual-return">--</div>
+                                </div>
+                                <div class="metric-card metric-danger">
+                                    <div class="metric-label">最大回撤</div>
+                                    <div class="metric-value" id="metric-max-drawdown">--</div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">夏普比率</div>
+                                    <div class="metric-value" id="metric-sharpe">--</div>
+                                </div>
+                                <div class="metric-card metric-success">
+                                    <div class="metric-label">胜率</div>
+                                    <div class="metric-value" id="metric-win-rate">--</div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">盈亏比</div>
+                                    <div class="metric-value" id="metric-pl-ratio">--</div>
+                                </div>
+                            </div>
+
+                            <!-- 净值曲线 -->
+                            <div class="chart-container">
+                                <h4 class="chart-title">净值曲线</h4>
+                                <canvas id="equity-chart"></canvas>
+                            </div>
+
+                            <!-- 交易统计 -->
+                            <div class="trade-stats">
+                                <div class="stat-item">
+                                    <span class="stat-label">总交易次数</span>
+                                    <span class="stat-value" id="stat-total-trades">--</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">盈利次数</span>
+                                    <span class="stat-value stat-success" id="stat-win-trades">--</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">亏损次数</span>
+                                    <span class="stat-value stat-danger" id="stat-lose-trades">--</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">基准收益</span>
+                                    <span class="stat-value" id="stat-benchmark">--</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">超额收益</span>
+                                    <span class="stat-value" id="stat-excess">--</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">最终权益</span>
+                                    <span class="stat-value" id="stat-final-equity">--</span>
+                                </div>
+                            </div>
+
+                            <!-- 交易记录 -->
+                            <div class="trades-section">
+                                <h4 class="section-title">交易记录</h4>
+                                <div class="table-container">
+                                    <table class="trade-table">
+                                        <thead>
+                                            <tr>
+                                                <th>买入日期</th>
+                                                <th>卖出日期</th>
+                                                <th>买入价</th>
+                                                <th>卖出价</th>
+                                                <th>盈亏</th>
+                                                <th>盈亏比</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="trade-table-body">
+                                            <!-- 动态生成 -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- 股票详情弹窗 -->
+    <div id="stock-modal" class="modal" style="display: none;">
+        <div class="modal-overlay" onclick="closeModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">股票详情</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body">
+                <!-- 动态内容 -->
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="container">
+            <p>© 2024 我的量化选股平台 | 数据仅供参考，不构成投资建议</p>
+        </div>
+    </footer>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
