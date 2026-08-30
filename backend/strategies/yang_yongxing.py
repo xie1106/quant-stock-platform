@@ -13,7 +13,7 @@ import pandas as pd
 from typing import List, Dict, Tuple
 from datetime import datetime
 
-from backend.data.stock_data import get_data_provider, norm_ticker
+from backend.data.stock_data import get_data_provider, norm_ticker, get_limit_up_threshold
 
 
 class YangYongxingStrategy:
@@ -25,37 +25,43 @@ class YangYongxingStrategy:
         self.strategy_desc = "尾盘买入法，通过筛选当日涨幅3%-5%、近30日有涨停、市值小于200亿、量比大于1、换手率5%-10%、14:30后创新高且回踩不破的标的，博取次日冲高收益。"
 
     def get_filter_conditions(self) -> List[Dict]:
-        """获取筛选条件说明"""
+        """获取筛选条件说明（通俗版）"""
         return [
             {
                 'name': '当日涨幅',
                 'condition': '3% ~ 5%',
-                'desc': '锁定温和上涨区间，避免追高'
+                'desc': '涨得不多不少刚刚好，说明有人关注但没涨过头',
+                'simple': '涨得温和，不追高'
             },
             {
                 'name': '近30日涨停',
                 'condition': '至少1次',
-                'desc': '股性活跃，有涨停基因'
+                'desc': '最近一个月内涨停过，说明这只股票"有脾气"，容易被资金拉升',
+                'simple': '近期强势过，股性活跃'
             },
             {
                 'name': '总市值',
                 'condition': '< 200亿',
-                'desc': '小盘股弹性更大'
+                'desc': '盘子不太大，资金容易撬动，涨起来快',
+                'simple': '盘子小，容易拉'
             },
             {
                 'name': '量比',
                 'condition': '> 1',
-                'desc': '当日放量，资金关注'
+                'desc': '今天成交量比平时大，说明有资金在买卖',
+                'simple': '放量了，有资金来'
             },
             {
                 'name': '换手率',
                 'condition': '5% ~ 10%',
-                'desc': '活跃度适中，避免过高或过低'
+                'desc': '交易活跃度适中，既不太冷也不太热',
+                'simple': '活跃度刚刚好'
             },
             {
                 'name': '14:30后创新高',
                 'condition': '回踩不破',
-                'desc': '尾盘强势拉升，资金做多意愿强'
+                'desc': '快收盘时还在往上冲，而且没有跌回来，说明资金信心足',
+                'simple': '尾盘强势，资金看好'
             }
         ]
 
@@ -76,7 +82,7 @@ class YangYongxingStrategy:
 
         total_stocks = len(stock_list)
         if progress_callback:
-            progress_callback(0, total_stocks, f"共获取 {total_stocks} 只股票，开始初筛...")
+            progress_callback(0, total_stocks, f"共 {total_stocks} 只股票，开始初筛...")
 
         # 第一步：基础条件筛选（涨幅、市值、量比、换手率）
         filtered = stock_list[
@@ -91,7 +97,7 @@ class YangYongxingStrategy:
 
         if progress_callback:
             progress_callback(len(filtered), total_stocks,
-                            f"初筛完成，剩余 {len(filtered)} 只股票，开始深度筛选...")
+                            f"初筛完成，{len(filtered)} 只进入深度筛选...")
 
         # 第二步：深度筛选（近30日涨停、14:30后创新高）
         candidates = []
@@ -113,6 +119,10 @@ class YangYongxingStrategy:
                 if not has_new_high:
                     continue
 
+                # 计算匹配度
+                match_score = self._calculate_score(row, limit_up_count, has_new_high)
+                rating, rating_desc = self._get_rating(match_score, row, limit_up_count)
+
                 # 符合所有条件
                 candidate = {
                     'code': code,
@@ -127,7 +137,10 @@ class YangYongxingStrategy:
                     'pullback_low': round(pullback_low, 2),
                     'pe': round(row.get('pe', 0), 2),
                     'pb': round(row.get('pb', 0), 2),
-                    'match_score': self._calculate_score(row, limit_up_count, has_new_high)
+                    'match_score': round(match_score, 0),
+                    'rating': rating,
+                    'rating_desc': rating_desc,
+                    'simple_explain': self._simple_explain(row, limit_up_count, match_score)
                 }
                 candidates.append(candidate)
 
@@ -139,6 +152,52 @@ class YangYongxingStrategy:
         candidates.sort(key=lambda x: x['match_score'], reverse=True)
 
         return candidates
+
+    def _get_rating(self, match_score: float, row: pd.Series, limit_up_count: int) -> Tuple[str, str]:
+        """根据匹配度生成通俗评级"""
+        if match_score >= 80:
+            return '推荐', '各项条件优秀，尾盘可重点关注'
+        elif match_score >= 65:
+            return '关注', '基本符合条件，可加入自选观察'
+        else:
+            return '谨慎', '部分条件偏弱，建议多看少动'
+
+    def _simple_explain(self, row: pd.Series, limit_up_count: int, score: float) -> str:
+        """生成一句话通俗解读"""
+        parts = []
+
+        # 涨幅
+        change = row['change_pct']
+        if 3.5 <= change <= 4.5:
+            parts.append('涨幅适中')
+        else:
+            parts.append('涨幅在范围内')
+
+        # 市值
+        cap = row['total_market_cap']
+        if cap < 50:
+            parts.append('小盘股弹性大')
+        elif cap < 100:
+            parts.append('中小盘')
+        else:
+            parts.append('偏中大市值')
+
+        # 涨停
+        if limit_up_count >= 3:
+            parts.append(f'近30日{limit_up_count}次涨停股性很活')
+        elif limit_up_count >= 2:
+            parts.append(f'近30日涨停{limit_up_count}次')
+        else:
+            parts.append('近30日有涨停')
+
+        # 量比
+        vr = row['volume_ratio']
+        if vr >= 2:
+            parts.append('明显放量')
+        else:
+            parts.append('温和放量')
+
+        return '，'.join(parts)
 
     def _calculate_score(self, row: pd.Series, limit_up_count: int, has_new_high: bool) -> float:
         """计算匹配度分数（0-100）"""
@@ -212,6 +271,8 @@ class YangYongxingStrategy:
         }
 
         all_match = all(conditions.values())
+        match_score = sum([20 if v else 0 for v in conditions.values()]) + 20
+        rating, rating_desc = self._get_rating(match_score, pd.Series(quote), limit_up_count) if all_match else ('不符合', '当前不满足杨永兴尾盘战法条件')
 
         return {
             'code': code,
@@ -220,6 +281,8 @@ class YangYongxingStrategy:
             'change_pct': quote['change_pct'],
             'conditions': conditions,
             'all_match': all_match,
+            'rating': rating,
+            'rating_desc': rating_desc,
             'limit_up_count_30d': limit_up_count,
             'day_high': day_high,
             'pullback_low': pullback_low,
@@ -230,22 +293,22 @@ class YangYongxingStrategy:
         }
 
     def _generate_suggestion(self, all_match: bool, conditions: Dict) -> str:
-        """生成操作建议"""
+        """生成操作建议（通俗版）"""
         if all_match:
-            return "✅ 符合杨永兴尾盘战法全部条件，可考虑在尾盘14:50左右介入，次日冲高止盈。"
+            return "符合全部条件！建议下午2:50左右关注，如果尾盘走势依然强势，可考虑小仓位介入，第二天冲高就卖出获利。"
 
         failed = []
         if not conditions['change_pct_ok']:
-            failed.append('涨幅不在3%-5%区间')
+            failed.append('涨幅不在3%-5%')
         if not conditions['limit_up_ok']:
-            failed.append('近30日无涨停')
+            failed.append('近30日没有涨停过')
         if not conditions['market_cap_ok']:
-            failed.append('市值超过200亿')
+            failed.append('市值超过200亿(太大了)')
         if not conditions['volume_ratio_ok']:
-            failed.append('量比不足1')
+            failed.append('量比不够(资金没怎么来)')
         if not conditions['turnover_ok']:
-            failed.append('换手率不在5%-10%区间')
+            failed.append('换手率不合适')
         if not conditions['new_high_ok']:
-            failed.append('14:30后未创新高或回踩破位')
+            failed.append('尾盘没有创新高或回踩破了')
 
-        return f"⚠️ 未满足条件：{'; '.join(failed)}"
+        return "暂时不符合条件：" + "；".join(failed) + "。可以继续观察，等条件满足再考虑。"
