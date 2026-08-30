@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
-from backend.data.stock_data import get_data_provider, norm_ticker
+from backend.data.stock_data import get_data_provider, norm_ticker, get_limit_up_threshold
 
 
 class BacktestEngine:
@@ -48,7 +48,7 @@ class BacktestEngine:
 
         # 根据策略生成交易信号
         if strategy == 'yang_yongxing':
-            signals = self._yang_yongxing_signals(df)
+            signals = self._yang_yongxing_signals(df, code)
         else:
             raise Exception(f"不支持的策略: {strategy}")
 
@@ -85,7 +85,7 @@ class BacktestEngine:
             'signal_count': int(len(signals[signals['signal'] != 0]))
         }
 
-    def _yang_yongxing_signals(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _yang_yongxing_signals(self, df: pd.DataFrame, code: str = '') -> pd.DataFrame:
         """
         生成杨永兴尾盘战法交易信号
         简化版回测：用日K线模拟尾盘战法
@@ -106,11 +106,12 @@ class BacktestEngine:
         df['vol_ma5'] = df['volume'].rolling(5).mean()
         df['volume_ratio'] = df['volume'] / df['vol_ma5']
 
-        # 标记涨停日
+        # 标记涨停日（根据板块判断涨停幅度）
+        limit_pct = get_limit_up_threshold(code)
         df['is_limit_up'] = False
         for i in range(1, len(df)):
             change = (df.iloc[i]['close'] - df.iloc[i - 1]['close']) / df.iloc[i - 1]['close'] * 100
-            if change >= 9.8:
+            if change >= limit_pct:
                 df.at[i, 'is_limit_up'] = True
 
         # 近30日涨停次数
