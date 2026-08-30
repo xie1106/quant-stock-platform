@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: quant-stock-platform
+    runtime: python
+    rootDir: .
+    buildCommand: pip install -r requirements.txt
+    startCommand: python backend/app.py
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.11.6"
+    autoDeploy: true
