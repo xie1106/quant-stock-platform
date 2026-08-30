@@ -12,6 +12,8 @@
 import pandas as pd
 from typing import List, Dict, Tuple
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 from backend.data.stock_data import get_data_provider, norm_ticker, get_limit_up_threshold
 
@@ -99,32 +101,30 @@ class YangYongxingStrategy:
             progress_callback(len(filtered), total_stocks,
                             f"初筛完成，{len(filtered)} 只进入深度筛选...")
 
-        # 第二步：深度筛选（近30日涨停、14:30后创新高）
+        # 第二步：深度筛选（近30日涨停、14:30后创新高）- 并行处理
         candidates = []
-        for idx, row in filtered.iterrows():
+        completed_count = 0
+        lock = threading.Lock()
+
+        def analyze_one(row):
+            """分析单只股票"""
             code = row['code']
-
-            if progress_callback:
-                progress_callback(len(candidates) + 1, len(filtered),
-                                f"正在分析 {code} {row['name']}...")
-
             try:
                 # 检查近30日涨停
                 limit_up_count = self.data_provider.get_limit_up_history(code, days=30)
                 if limit_up_count < 1:
-                    continue
+                    return None
 
                 # 检查14:30后创新高且回踩不破
                 has_new_high, day_high, pullback_low = self.data_provider.check_intraday_new_high_after_1430(code)
                 if not has_new_high:
-                    continue
+                    return None
 
                 # 计算匹配度
                 match_score = self._calculate_score(row, limit_up_count, has_new_high)
                 rating, rating_desc = self._get_rating(match_score, row, limit_up_count)
 
-                # 符合所有条件
-                candidate = {
+                return {
                     'code': code,
                     'name': row['name'],
                     'price': round(row['price'], 2),
@@ -142,11 +142,24 @@ class YangYongxingStrategy:
                     'rating_desc': rating_desc,
                     'simple_explain': self._simple_explain(row, limit_up_count, match_score)
                 }
-                candidates.append(candidate)
-
             except Exception as e:
                 print(f"分析 {code} 失败: {e}")
-                continue
+                return None
+
+        # 使用线程池并行分析（最多 8 个并发）
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(analyze_one, row): idx for idx, row in filtered.iterrows()}
+
+            for future in as_completed(futures):
+                completed_count += 1
+                if progress_callback:
+                    with lock:
+                        progress_callback(completed_count, len(filtered),
+                                        f"深度分析中... ({completed_count}/{len(filtered)})")
+
+                result = future.result()
+                if result is not None:
+                    candidates.append(result)
 
         # 按匹配度排序
         candidates.sort(key=lambda x: x['match_score'], reverse=True)
