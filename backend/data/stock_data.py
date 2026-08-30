@@ -32,6 +32,21 @@ def get_market_prefix(code: str) -> str:
     return 'sh'
 
 
+def get_limit_up_threshold(code: str) -> float:
+    """根据股票代码判断涨停幅度（考虑ST股和不同板块）"""
+    code = norm_ticker(code)
+    # ST股涨停5%
+    # 创业板(30开头) / 科创板(68开头) 涨停20%
+    if code.startswith('30') or code.startswith('68'):
+        return 19.5  # 用19.5作为阈值，留容差
+    # 北交所涨停30%
+    elif code.startswith(('43', '83', '87', '92')):
+        return 29.0
+    # 主板涨停10%
+    else:
+        return 9.5  # 用9.5作为阈值，考虑四舍五入
+
+
 class StockDataProvider:
     """A股数据提供者 - 封装多数据源"""
 
@@ -217,6 +232,14 @@ class StockDataProvider:
                 # 市值转为亿元
                 df['total_market_cap'] = df['total_market_cap'] / 1e8
                 df['circulating_market_cap'] = df['circulating_market_cap'] / 1e8
+
+                # 排除 ST、*ST、退市股
+                df = df[~df['name'].str.contains('ST', case=False, na=False)]
+                df = df[~df['name'].str.contains('退', na=False)]
+
+                # 排除异常数据（价格为0或市值为0）
+                df = df[(df['price'] > 0) & (df['total_market_cap'] > 0)]
+
                 return df
 
         except Exception as e:
@@ -284,14 +307,15 @@ class StockDataProvider:
             if df.empty or len(df) < 2:
                 return 0
 
+            # 根据板块获取涨停阈值
+            limit_pct = get_limit_up_threshold(code)
+
             limit_up_count = 0
             for i in range(1, min(len(df), days + 1)):
                 pre_close = df.iloc[i - 1]['close']
                 close = df.iloc[i]['close']
                 if pre_close > 0:
                     change_pct = (close - pre_close) / pre_close * 100
-                    # 主板涨停10%，创业板/科创板20%，ST股5%
-                    limit_pct = 9.8  # 用9.8作为阈值，考虑四舍五入
                     if change_pct >= limit_pct:
                         limit_up_count += 1
 
