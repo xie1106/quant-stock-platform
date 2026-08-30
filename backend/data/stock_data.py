@@ -56,6 +56,30 @@ class StockDataProvider:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         self._tdx_client = None
+        # 数据缓存
+        self._cache = {}
+        self._cache_ttl = 300  # 缓存有效期 5 分钟
+
+    def _cache_key(self, method, code, **kwargs):
+        """生成缓存键"""
+        return f"{method}:{code}:{kwargs}"
+
+    def _get_cached(self, key):
+        """获取缓存数据，过期返回 None"""
+        if key in self._cache:
+            entry = self._cache[key]
+            if time.time() - entry['time'] < self._cache_ttl:
+                return entry['data']
+        return None
+
+    def _set_cached(self, key, data):
+        """设置缓存"""
+        self._cache[key] = {'data': data, 'time': time.time()}
+        # 清理过期缓存，避免内存泄漏
+        if len(self._cache) > 200:
+            now = time.time()
+            self._cache = {k: v for k, v in self._cache.items()
+                          if now - v['time'] < self._cache_ttl}
 
     def _get_tdx_client(self):
         """获取通达信客户端"""
@@ -74,6 +98,12 @@ class StockDataProvider:
         period: daily(日线), weekly(周线), monthly(月线), 1min(1分钟), 5min(5分钟), 15min(15分钟), 30min(30分钟), 60min(60分钟)
         """
         code = norm_ticker(code)
+
+        # 检查缓存
+        cache_key = self._cache_key('kline', code, period=period, count=count)
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
 
         # 优先使用mootdx
         client = self._get_tdx_client()
@@ -187,6 +217,11 @@ class StockDataProvider:
 
     def get_stock_list(self) -> pd.DataFrame:
         """获取A股股票列表"""
+        # 检查缓存
+        cached = self._get_cached('stock_list')
+        if cached is not None:
+            return cached
+
         try:
             # 从东方财富获取股票列表
             url = 'http://80.push2.eastmoney.com/api/qt/clist/get'
@@ -240,6 +275,8 @@ class StockDataProvider:
                 # 排除异常数据（价格为0或市值为0）
                 df = df[(df['price'] > 0) & (df['total_market_cap'] > 0)]
 
+                # 设置缓存
+                self._set_cached('stock_list', df)
                 return df
 
         except Exception as e:
