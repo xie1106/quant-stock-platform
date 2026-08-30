@@ -10,13 +10,16 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 # 添加项目根目录到路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
 
 from backend.data.stock_data import get_data_provider, norm_ticker
 from backend.strategies.yang_yongxing import YangYongxingStrategy
 from backend.backtest.engine import BacktestEngine
 
-app = Flask(__name__, static_folder='../frontend', static_url_path='')
+FRONTEND_DIR = os.path.join(PROJECT_ROOT, 'frontend')
+
+app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
 CORS(app)
 
 # 初始化
@@ -31,18 +34,18 @@ screen_tasks = {}
 @app.route('/')
 def index():
     """首页"""
-    return send_from_directory('../frontend', 'index.html')
+    return send_from_directory(FRONTEND_DIR, 'index.html')
 
 
 # ===== 静态文件 =====
 @app.route('/css/<path:filename>')
 def serve_css(filename):
-    return send_from_directory('../frontend/css', filename)
+    return send_from_directory(os.path.join(FRONTEND_DIR, 'css'), filename)
 
 
 @app.route('/js/<path:filename>')
 def serve_js(filename):
-    return send_from_directory('../frontend/js', filename)
+    return send_from_directory(os.path.join(FRONTEND_DIR, 'js'), filename)
 
 
 # ===== 策略条件（通俗版） =====
@@ -160,9 +163,11 @@ def health_check():
 
 
 if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    debug_mode = os.environ.get('FLASK_ENV') == 'development'
     print("=" * 60)
     print("  我的量化选股平台 - 启动中...")
     print("=" * 60)
-    print("  访问地址: http://localhost:5000")
+    print(f"  访问地址: http://localhost:{port}")
     print("=" * 60)
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
