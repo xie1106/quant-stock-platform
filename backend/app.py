@@ -34,213 +34,121 @@ def index():
     return send_from_directory('../frontend', 'index.html')
 
 
-@app.route('/api/stock/list')
-def get_stock_list():
-    """获取股票列表"""
-    try:
-        df = data_provider.get_stock_list()
-        stocks = df.to_dict('records')
-        return jsonify({
-            'success': True,
-            'data': stocks,
-            'total': len(stocks)
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+# ===== 静态文件 =====
+@app.route('/css/<path:filename>')
+def serve_css(filename):
+    return send_from_directory('../frontend/css', filename)
 
 
-@app.route('/api/stock/quote/<code>')
-def get_stock_quote(code):
-    """获取股票实时行情"""
-    try:
-        quote = data_provider.get_realtime_quote(code)
-        return jsonify({
-            'success': True,
-            'data': quote
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+@app.route('/js/<path:filename>')
+def serve_js(filename):
+    return send_from_directory('../frontend/js', filename)
 
 
-@app.route('/api/stock/kline/<code>')
-def get_stock_kline(code):
-    """获取K线数据"""
-    try:
-        period = request.args.get('period', 'daily')
-        count = int(request.args.get('count', 100))
-
-        df = data_provider.get_kline(code, period=period, count=count)
-        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
-        data = df.to_dict('records')
-
-        return jsonify({
-            'success': True,
-            'data': data
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@app.route('/api/strategy/list')
-def get_strategy_list():
-    """获取策略列表"""
-    strategies = [
-        {
-            'id': 'yang_yongxing',
-            'name': strategy.strategy_name,
-            'desc': strategy.strategy_desc,
-            'conditions': strategy.get_filter_conditions()
-        }
-    ]
+# ===== 策略条件（通俗版） =====
+@app.route('/api/strategy/conditions')
+def get_strategy_conditions():
+    """获取策略筛选条件说明"""
     return jsonify({
-        'success': True,
-        'data': strategies
+        'conditions': strategy.get_filter_conditions()
     })
 
 
-@app.route('/api/screen/start', methods=['POST'])
+# ===== 一键选股 =====
+@app.route('/api/screen', methods=['POST'])
 def start_screen():
-    """开始选股"""
-    try:
-        strategy_id = request.json.get('strategy', 'yang_yongxing')
+    """开始选股（一键模式）"""
+    task_id = str(int(time.time() * 1000))
 
-        if strategy_id != 'yang_yongxing':
-            return jsonify({
-                'success': False,
-                'error': f'不支持的策略: {strategy_id}'
-            }), 400
+    def run_screen():
+        screen_tasks[task_id] = {
+            'status': 'running',
+            'current': 0,
+            'total': 0,
+            'message': '初始化中...',
+            'results': []
+        }
 
-        task_id = str(int(time.time()))
+        def progress_callback(current, total, message):
+            screen_tasks[task_id]['current'] = current
+            screen_tasks[task_id]['total'] = total
+            screen_tasks[task_id]['message'] = message
 
-        # 启动选股任务
-        def run_screen():
-            screen_tasks[task_id] = {
-                'status': 'running',
-                'progress': 0,
-                'total': 0,
-                'message': '初始化...',
-                'result': []
-            }
+        try:
+            result = strategy.screen_stocks(progress_callback)
+            screen_tasks[task_id]['status'] = 'completed'
+            screen_tasks[task_id]['results'] = result
+            screen_tasks[task_id]['message'] = f'选股完成，共找到 {len(result)} 只股票'
+        except Exception as e:
+            screen_tasks[task_id]['status'] = 'failed'
+            screen_tasks[task_id]['message'] = f'选股失败: {str(e)}'
 
-            def progress_callback(current, total, message):
-                screen_tasks[task_id]['progress'] = current
-                screen_tasks[task_id]['total'] = total
-                screen_tasks[task_id]['message'] = message
+    thread = threading.Thread(target=run_screen)
+    thread.daemon = True
+    thread.start()
 
-            try:
-                result = strategy.screen_stocks(progress_callback)
-                screen_tasks[task_id]['status'] = 'completed'
-                screen_tasks[task_id]['result'] = result
-                screen_tasks[task_id]['message'] = f'选股完成，共找到 {len(result)} 只符合条件的股票'
-            except Exception as e:
-                screen_tasks[task_id]['status'] = 'failed'
-                screen_tasks[task_id]['error'] = str(e)
-                screen_tasks[task_id]['message'] = f'选股失败: {str(e)}'
-
-        thread = threading.Thread(target=run_screen)
-        thread.daemon = True
-        thread.start()
-
-        return jsonify({
-            'success': True,
-            'task_id': task_id
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+    return jsonify({'task_id': task_id})
 
 
 @app.route('/api/screen/status/<task_id>')
 def get_screen_status(task_id):
     """获取选股进度"""
     if task_id not in screen_tasks:
-        return jsonify({
-            'success': False,
-            'error': '任务不存在'
-        }), 404
+        return jsonify({'status': 'not_found', 'message': '任务不存在'}), 404
 
     task = screen_tasks[task_id]
     return jsonify({
-        'success': True,
-        'data': task
+        'status': task['status'],
+        'current': task.get('current', 0),
+        'total': task.get('total', 0),
+        'message': task.get('message', ''),
+        'results': task.get('results', [])
     })
 
 
-@app.route('/api/signal/<code>')
-def get_buy_signal(code):
-    """获取个股买入信号"""
+# ===== 个股信号 =====
+@app.route('/api/stock/<code>/signal')
+def get_stock_signal(code):
+    """获取个股买入信号详情"""
     try:
         signal = strategy.generate_buy_signal(code)
-        return jsonify({
-            'success': True,
-            'data': signal
-        })
+        return jsonify(signal)
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/backtest/run', methods=['POST'])
+# ===== 回测（GET 简化版） =====
+@app.route('/api/backtest')
 def run_backtest():
-    """执行回测"""
+    """执行回测 - GET方式，参数通过query传递"""
     try:
-        data = request.json
-        code = data.get('code')
-        strategy_id = data.get('strategy', 'yang_yongxing')
-        initial_capital = float(data.get('initial_capital', 100000))
-        commission_rate = float(data.get('commission_rate', 0.001))
-        start_date = data.get('start_date')
-        end_date = data.get('end_date')
+        code = request.args.get('code', '')
+        capital = float(request.args.get('capital', 100000))
+        commission_pct = float(request.args.get('commission', 0.1))
+        start_date = request.args.get('start', '')
+        end_date = request.args.get('end', '')
 
         if not code:
-            return jsonify({
-                'success': False,
-                'error': '请输入股票代码'
-            }), 400
+            return jsonify({'error': '请输入股票代码'}), 400
+
+        # 手续费率：用户输入百分比，转为小数
+        commission_rate = commission_pct / 100
 
         result = backtest_engine.run_backtest(
             code=code,
-            strategy=strategy_id,
-            initial_capital=initial_capital,
+            strategy='yang_yongxing',
+            initial_capital=capital,
             commission_rate=commission_rate,
-            start_date=start_date,
-            end_date=end_date
+            start_date=start_date if start_date else None,
+            end_date=end_date if end_date else None
         )
 
-        return jsonify({
-            'success': True,
-            'data': result
-        })
+        return jsonify(result)
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/backtest/strategies')
-def get_backtest_strategies():
-    """获取回测策略列表"""
-    strategies = backtest_engine.get_available_strategies()
-    return jsonify({
-        'success': True,
-        'data': strategies
-    })
-
-
+# ===== 健康检查 =====
 @app.route('/api/health')
 def health_check():
     """健康检查"""
@@ -256,6 +164,5 @@ if __name__ == '__main__':
     print("  我的量化选股平台 - 启动中...")
     print("=" * 60)
     print("  访问地址: http://localhost:5000")
-    print("  API文档: http://localhost:5000/api/health")
     print("=" * 60)
     app.run(host='0.0.0.0', port=5000, debug=True)
